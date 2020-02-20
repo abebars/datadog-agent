@@ -25,7 +25,7 @@ var (
 	globalGardenUtilLock sync.Mutex
 )
 
-// CFUtil wraps interactions with a local garden API.
+// GardenUtil wraps interactions with a local garden API.
 type GardenUtil struct {
 	retrier retry.Retrier
 	cli     client.Client
@@ -55,11 +55,12 @@ func GetGardenUtil() (*GardenUtil, error) {
 	return globalGardenUtil, nil
 }
 
-func (gu *GardenUtil) ListContainers() ([]*containers.Container, error) {
+func (gu *GardenUtil) gardenContainers() ([]*containers.Container, error) {
 	gardenContainers, err := gu.cli.Containers(nil)
 	if err != nil {
 		return nil, fmt.Errorf("error listing garden containers: %v", err)
 	}
+
 	var containerList = make([]*containers.Container, len(gardenContainers))
 	var containerMap = make(map[string]*garden.Container, len(gardenContainers))
 	handles := make([]string, len(gardenContainers))
@@ -71,19 +72,11 @@ func (gu *GardenUtil) ListContainers() ([]*containers.Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error getting info for garden containers: %v", err)
 	}
-	gardenContainerMetrics, err := gu.cli.BulkMetrics(handles)
-	if err != nil {
-		return nil, fmt.Errorf("error getting metrics for garden containers: %v", err)
-	}
+
 	for i, handle := range handles {
 		infoEntry := gardenContainerInfo[handle]
-		metricsEntry := gardenContainerMetrics[handle]
 		if err := infoEntry.Err; err != nil {
 			log.Debugf("could not get info for container %s: %v", handle, err)
-			continue
-		}
-		if err := metricsEntry.Err; err != nil {
-			log.Debugf("could not get metrics for container %s: %v", handle, err)
 			continue
 		}
 		container := containers.Container{
@@ -93,40 +86,56 @@ func (gu *GardenUtil) ListContainers() ([]*containers.Container, error) {
 			Name:        handle,
 			Image:       "",
 			ImageID:     "",
-			Created:     time.Now().Add(-metricsEntry.Metrics.Age).Unix(),
 			State:       infoEntry.Info.State,
 			Excluded:    false,
 			Health:      "",
 			AddressList: parseContainerPorts(infoEntry.Info),
 		}
 		containerList[i] = &container
-
-		setContainerLimits(&container, containerMap[container.ID])
-		setContainerMetrics(&container, metricsEntry.Metrics)
 	}
 	return containerList, nil
 }
 
-func (gu *GardenUtil) UpdateContainerMetrics(cList []*containers.Container) error {
-	handles := make([]string, len(cList))
-	for i, container := range cList {
+func (gu *GardenUtil) ListContainers() ([]*containers.Container, error) {
+	cList, err := gu.gardenContainers()
+	if err != nil {
+		return nil, fmt.Errorf("could not get docker containers: %s", err)
+	}
+
+	cgByContainer, err := metrics.ScrapeAllCgroups()
+	if err != nil {
+		return nil, fmt.Errorf("could not get cgroups: %s", err)
+	}
+	for _, container := range cList {
 		if container.State != containers.ContainerActiveState {
 			continue
 		}
-		handles[i] = container.ID
-	}
-	metricsEntries, err := gu.cli.BulkMetrics(handles)
-	if err != nil {
-		return fmt.Errorf("error getting metrics for garden containers: %v", err)
-	}
-
-	for _, container := range cList {
-		metricsEntry := metricsEntries[container.ID]
-		if err := metricsEntry.Err; err != nil {
-			log.Debugf("error refreshing metrics for garden container %s: %v", container.ID, err)
+		cgroup, ok := cgByContainer[container.ID]
+		if !ok {
+			log.Debugf("No matching cgroups for container %s, skipping", container.ID[:12])
 			continue
 		}
-		setContainerMetrics(container, metricsEntry.Metrics)
+		container.SetCgroups(cgroup)
+		err = container.FillCgroupLimits()
+		if err != nil {
+			log.Debugf("Cannot get limits for container %s: %s, skipping", container.ID[:12], err)
+			continue
+		}
+	}
+	return cList, nil
+}
+
+func (gu *GardenUtil) UpdateContainerMetrics(cList []*containers.Container) error {
+	for _, container := range cList {
+		if container.State != containers.ContainerActiveState {
+			continue
+		}
+
+		err := container.FillCgroupMetrics()
+		if err != nil {
+			log.Debugf("Cannot get metrics for container %s: %s", container.ID[:12], err)
+			continue
+		}
 	}
 	return nil
 }
@@ -197,9 +206,9 @@ func setContainerMetrics(container *containers.Container, gardenMetrics garden.M
 	}
 	container.CPU = &metrics.CgroupTimesStat{
 		ContainerID: container.ID,
-		System:      gardenMetrics.CPUStat.System,
-		User:        gardenMetrics.CPUStat.User,
-		SystemUsage: gardenMetrics.CPUStat.Usage,
+		System:      gardenMetrics.CPUStat.System / 1e7,
+		User:        gardenMetrics.CPUStat.User / 1e7,
+		SystemUsage: gardenMetrics.CPUStat.Usage / 1e7,
 	}
 	container.Network = metrics.ContainerNetStats{
 		&metrics.InterfaceNetStats{

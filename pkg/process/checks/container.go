@@ -3,6 +3,7 @@
 package checks
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -151,6 +152,7 @@ func fmtContainers(ctrList []*containers.Container, lastRates map[string]util.Co
 
 		// Retrieves metadata tags
 		tags, err := tagger.Tag(ctr.EntityID, collectors.HighCardinality)
+		fmt.Println(tags)
 		if err != nil {
 			log.Errorf("unable to retrieve tags for container: %s", err)
 			tags = []string{}
