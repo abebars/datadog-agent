@@ -7,9 +7,7 @@ package collectors
 
 import (
 	"fmt"
-	"time"
 
-	"github.com/DataDog/datadog-agent/pkg/errors"
 	"github.com/DataDog/datadog-agent/pkg/util/cloudfoundry"
 	"github.com/DataDog/datadog-agent/pkg/util/containers"
 	"github.com/DataDog/datadog-agent/pkg/util/log"
@@ -25,13 +23,10 @@ const (
 type GardenCollector struct {
 	infoOut    chan<- []*TagInfo
 	gardenUtil *cloudfoundry.GardenUtil
-	lastUpdate time.Time
-	updateFreq time.Duration
 }
 
 // Detect tries to connect to the Garden API
 func (c *GardenCollector) Detect(out chan<- []*TagInfo) (CollectionMode, error) {
-	fmt.Println("Detecting tagger hahahahahahahahahahahhahahahahah")
 	var err error
 	c.gardenUtil, err = cloudfoundry.GetGardenUtil()
 	if err != nil {
@@ -43,66 +38,32 @@ func (c *GardenCollector) Detect(out chan<- []*TagInfo) (CollectionMode, error) 
 	}
 
 	c.infoOut = out
-	c.updateFreq = 15 * time.Second
 	return PullCollection, nil
 }
 
-// Pull implements an additional time constraints to avoid exhausting the kube-apiserver
+// Pull gets the list of containers
 func (c *GardenCollector) Pull() error {
-	fmt.Println("Pulling tags hahahahahahahahahahahhahahahahah")
-	// Time constraints, get the delta in seconds to display it in the logs:
-	timeDelta := c.lastUpdate.Add(c.updateFreq).Unix() - time.Now().Unix()
-	if timeDelta > 0 {
-		log.Tracef("skipping, next effective Pull will be in %d seconds", timeDelta)
-		return nil
-	}
-
-	containers, err := c.gardenUtil.ListContainers()
+	containerList, err := c.gardenUtil.GetGardenContainers()
 	if err != nil {
 		return err
 	}
 
-	var tagInfo = make([]*TagInfo, len(containers))
-	for i, c := range containers {
+	var tagInfo = make([]*TagInfo, len(containerList))
+	for i, c := range containerList {
+		containerHandle := containers.BuildTaggerEntityName(c.Handle())
 		tagInfo[i] = &TagInfo{
-			Source:               gardenCollectorName,
-			Entity:               c.EntityID,
-			HighCardTags:         []string{fmt.Sprintf("container_name:%s", c.EntityID)},
-			OrchestratorCardTags: nil,
-			LowCardTags:          nil,
-			DeleteEntity:         false,
-			CacheMiss:            false,
+			Source:       gardenCollectorName,
+			Entity:       containerHandle,
+			HighCardTags: []string{fmt.Sprintf("container_name:%s", containerHandle)},
 		}
 	}
 	c.infoOut <- tagInfo
-	c.lastUpdate = time.Now()
 	return nil
 }
 
-// Pull implements an additional time constraints to avoid exhausting the kube-apiserver
+// Fetch gets the tags for a specific entity
 func (c *GardenCollector) Fetch(entity string) ([]string, []string, []string, error) {
-	fmt.Print("Fetching tags for ")
-	fmt.Print(entity)
-	fmt.Println(" hahahahahahahahahahahhahahahahah")
-
-	var tagInfos = []*TagInfo{
-		{
-			Source:               gardenCollectorName,
-			Entity:               containers.ContainerIDForEntity(entity),
-			HighCardTags:         []string{fmt.Sprintf("container_name:%s", entity)},
-			OrchestratorCardTags: nil,
-			LowCardTags:          nil,
-			DeleteEntity:         false,
-			CacheMiss:            false,
-		},
-	}
-	c.infoOut <- tagInfos
-	for _, info := range tagInfos {
-		if info.Entity == entity {
-			return info.LowCardTags, info.OrchestratorCardTags, info.HighCardTags, nil
-		}
-	}
-	return nil, nil, nil, errors.NewNotFound(entity)
+	return []string{}, []string{}, []string{fmt.Sprintf("container_name:%s", entity)}, nil
 }
 
 func gardenFactory() Collector {

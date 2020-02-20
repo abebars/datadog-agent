@@ -3,7 +3,6 @@
 package checks
 
 import (
-	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -138,6 +137,7 @@ func fmtContainers(ctrList []*containers.Container, lastRates map[string]util.Co
 	for _, ctr := range ctrList {
 		lastCtr, ok := lastRates[ctr.ID]
 		if !ok {
+			log.Errorf("last ctr not found")
 			// Set to an empty container so rate calculations work and use defaults.
 			lastCtr = util.NullContainerRates
 		}
@@ -152,7 +152,6 @@ func fmtContainers(ctrList []*containers.Container, lastRates map[string]util.Co
 
 		// Retrieves metadata tags
 		tags, err := tagger.Tag(ctr.EntityID, collectors.HighCardinality)
-		fmt.Println(tags)
 		if err != nil {
 			log.Errorf("unable to retrieve tags for container: %s", err)
 			tags = []string{}
@@ -226,15 +225,19 @@ func convertAddressList(ctr *containers.Container) []*model.ContainerAddr {
 
 func fillNilContainer(ctr *containers.Container) *containers.Container {
 	if ctr.CPU == nil {
+		log.Errorf("nil CPU")
 		ctr.CPU = util.NullContainerRates.CPU
 	}
 	if ctr.IO == nil {
+		log.Errorf("nil IO")
 		ctr.IO = util.NullContainerRates.IO
 	}
 	if ctr.Network == nil {
+		log.Errorf("nil Networks")
 		ctr.Network = util.NullContainerRates.Network
 	}
 	if ctr.Memory == nil {
+		log.Errorf("nil Memory")
 		ctr.Memory = &metrics.CgroupMemStat{}
 	}
 	return ctr
@@ -243,12 +246,15 @@ func fillNilContainer(ctr *containers.Container) *containers.Container {
 func fillNilRates(rates util.ContainerRateMetrics) util.ContainerRateMetrics {
 	r := &rates
 	if rates.CPU == nil {
+		log.Errorf("nil CPU rate")
 		r.CPU = util.NullContainerRates.CPU
 	}
 	if rates.IO == nil {
+		log.Errorf("nil IO rate")
 		r.IO = util.NullContainerRates.IO
 	}
 	if rates.NetworkSum == nil {
+		log.Errorf("nil network rate")
 		r.NetworkSum = util.NullContainerRates.NetworkSum
 	}
 	return *r

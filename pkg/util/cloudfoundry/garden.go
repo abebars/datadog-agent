@@ -54,21 +54,26 @@ func GetGardenUtil() (*GardenUtil, error) {
 	}
 	return globalGardenUtil, nil
 }
+func (gu *GardenUtil) GetGardenContainers() ([]garden.Container, error) {
+	return gu.cli.Containers(nil)
+}
 
-func (gu *GardenUtil) gardenContainers() ([]*containers.Container, error) {
-	gardenContainers, err := gu.cli.Containers(nil)
+func (gu *GardenUtil) ListContainers() ([]*containers.Container, error) {
+	gardenContainers, err := gu.GetGardenContainers()
 	if err != nil {
 		return nil, fmt.Errorf("error listing garden containers: %v", err)
 	}
 
-	var containerList = make([]*containers.Container, len(gardenContainers))
-	var containerMap = make(map[string]*garden.Container, len(gardenContainers))
+	var cList = make([]*containers.Container, len(gardenContainers))
 	handles := make([]string, len(gardenContainers))
 	for i, gardenContainer := range gardenContainers {
 		handles[i] = gardenContainer.Handle()
-		containerMap[gardenContainer.Handle()] = &gardenContainer
 	}
 	gardenContainerInfo, err := gu.cli.BulkInfo(handles)
+	if err != nil {
+		return nil, fmt.Errorf("error getting info for garden containers: %v", err)
+	}
+	gardenContainerMetrics, err := gu.cli.BulkMetrics(handles)
 	if err != nil {
 		return nil, fmt.Errorf("error getting info for garden containers: %v", err)
 	}
@@ -79,27 +84,21 @@ func (gu *GardenUtil) gardenContainers() ([]*containers.Container, error) {
 			log.Debugf("could not get info for container %s: %v", handle, err)
 			continue
 		}
+		metricsEntry := gardenContainerMetrics[handle]
+		if err := metricsEntry.Err; err != nil {
+			log.Debugf("could not get info for container %s: %v", handle, err)
+			continue
+		}
 		container := containers.Container{
 			Type:        "garden",
 			ID:          handle,
 			EntityID:    containers.BuildTaggerEntityName(handle),
-			Name:        handle,
-			Image:       "",
-			ImageID:     "",
 			State:       infoEntry.Info.State,
 			Excluded:    false,
-			Health:      "",
+			Created:     time.Now().Add(-metricsEntry.Metrics.Age).Unix(),
 			AddressList: parseContainerPorts(infoEntry.Info),
 		}
-		containerList[i] = &container
-	}
-	return containerList, nil
-}
-
-func (gu *GardenUtil) ListContainers() ([]*containers.Container, error) {
-	cList, err := gu.gardenContainers()
-	if err != nil {
-		return nil, fmt.Errorf("could not get docker containers: %s", err)
+		cList[i] = &container
 	}
 
 	cgByContainer, err := metrics.ScrapeAllCgroups()
@@ -122,7 +121,8 @@ func (gu *GardenUtil) ListContainers() ([]*containers.Container, error) {
 			continue
 		}
 	}
-	return cList, nil
+	err = gu.UpdateContainerMetrics(cList)
+	return cList, err
 }
 
 func (gu *GardenUtil) UpdateContainerMetrics(cList []*containers.Container) error {
@@ -136,85 +136,23 @@ func (gu *GardenUtil) UpdateContainerMetrics(cList []*containers.Container) erro
 			log.Debugf("Cannot get metrics for container %s: %s", container.ID[:12], err)
 			continue
 		}
-	}
-	return nil
-}
-
-func setContainerLimits(container *containers.Container, gardenContainer *garden.Container) {
-	cpuLimits, err := (*gardenContainer).CurrentCPULimits()
-	if err != nil {
-		log.Debugf("Error getting CPU limits for garden container %s: %v", container.ID, err)
-	} else {
-		if cpuLimits.Weight != 0 {
-			container.CPULimit = float64(cpuLimits.Weight)
-		} else {
-			container.CPULimit = float64(cpuLimits.LimitInShares)
+		err = container.FillNetworkMetrics(map[string]string{})
+		if err != nil {
+			log.Debugf("Cannot get network metrics for container %s: %s", container.ID[:12], err)
+			continue
 		}
 	}
-	memLimits, err := (*gardenContainer).CurrentMemoryLimits()
-	if err != nil {
-		log.Debugf("Error getting memory limits for garden container %s: %v", container.ID, err)
-	} else {
-		container.MemLimit = memLimits.LimitInBytes
-	}
+	return nil
 }
 
 func parseContainerPorts(info garden.ContainerInfo) []containers.NetworkAddress {
 	var addresses = make([]containers.NetworkAddress, len(info.MappedPorts))
 	for i, port := range info.MappedPorts {
 		addresses[i] = containers.NetworkAddress{
-			IP:       net.IP(info.ExternalIP),
+			IP:       net.ParseIP(info.ExternalIP),
 			Port:     int(port.HostPort),
 			Protocol: "tcp",
 		}
 	}
 	return addresses
-}
-
-func setContainerMetrics(container *containers.Container, gardenMetrics garden.Metrics) {
-	container.Memory = &metrics.CgroupMemStat{
-		ContainerID:             container.ID,
-		Cache:                   gardenMetrics.MemoryStat.Cache,
-		Swap:                    gardenMetrics.MemoryStat.Swap,
-		SwapPresent:             true,
-		RSS:                     gardenMetrics.MemoryStat.Rss,
-		MappedFile:              gardenMetrics.MemoryStat.MappedFile,
-		Pgpgin:                  gardenMetrics.MemoryStat.Pgpgin,
-		Pgpgout:                 gardenMetrics.MemoryStat.Pgpgout,
-		Pgfault:                 gardenMetrics.MemoryStat.Pgfault,
-		Pgmajfault:              gardenMetrics.MemoryStat.Pgmajfault,
-		InactiveAnon:            gardenMetrics.MemoryStat.InactiveAnon,
-		ActiveAnon:              gardenMetrics.MemoryStat.ActiveAnon,
-		InactiveFile:            gardenMetrics.MemoryStat.InactiveFile,
-		ActiveFile:              gardenMetrics.MemoryStat.ActiveFile,
-		Unevictable:             gardenMetrics.MemoryStat.Unevictable,
-		HierarchicalMemoryLimit: gardenMetrics.MemoryStat.HierarchicalMemoryLimit,
-		HierarchicalMemSWLimit:  gardenMetrics.MemoryStat.HierarchicalMemswLimit,
-		TotalCache:              gardenMetrics.MemoryStat.TotalCache,
-		TotalRSS:                gardenMetrics.MemoryStat.TotalRss,
-		TotalMappedFile:         gardenMetrics.MemoryStat.TotalMappedFile,
-		TotalPgpgIn:             gardenMetrics.MemoryStat.TotalPgpgin,
-		TotalPgpgOut:            gardenMetrics.MemoryStat.TotalPgpgout,
-		TotalPgFault:            gardenMetrics.MemoryStat.TotalPgfault,
-		TotalPgMajFault:         gardenMetrics.MemoryStat.TotalPgmajfault,
-		TotalInactiveAnon:       gardenMetrics.MemoryStat.TotalInactiveAnon,
-		TotalActiveAnon:         gardenMetrics.MemoryStat.TotalActiveAnon,
-		TotalInactiveFile:       gardenMetrics.MemoryStat.TotalInactiveFile,
-		TotalActiveFile:         gardenMetrics.MemoryStat.TotalActiveFile,
-		TotalUnevictable:        gardenMetrics.MemoryStat.TotalUnevictable,
-		MemUsageInBytes:         gardenMetrics.MemoryStat.TotalUsageTowardLimit,
-	}
-	container.CPU = &metrics.CgroupTimesStat{
-		ContainerID: container.ID,
-		System:      gardenMetrics.CPUStat.System / 1e7,
-		User:        gardenMetrics.CPUStat.User / 1e7,
-		SystemUsage: gardenMetrics.CPUStat.Usage / 1e7,
-	}
-	container.Network = metrics.ContainerNetStats{
-		&metrics.InterfaceNetStats{
-			NetworkName: "default",
-			BytesSent:   gardenMetrics.NetworkStat.TxBytes,
-			BytesRcvd:   gardenMetrics.NetworkStat.RxBytes,
-		},
-	}
 }
