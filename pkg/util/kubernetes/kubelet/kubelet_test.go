@@ -167,6 +167,19 @@ type KubeletTestSuite struct {
 	suite.Suite
 }
 
+func (suite *KubeletTestSuite) getCustomKubeUtil() KubeUtilInterface {
+	suite.T().Helper()
+
+	kubeutil, err := GetKubeUtil()
+	require.Nil(suite.T(), err)
+	require.NotNil(suite.T(), kubeutil)
+
+	// Custom parameters, hardcoded at the moment
+	globalKubeUtil.httpOnly = true
+
+	return kubeutil
+}
+
 // Make sure globalKubeUtil is deleted before each test
 func (suite *KubeletTestSuite) SetupTest() {
 	mockConfig := config.Mock()
@@ -236,9 +249,7 @@ func (suite *KubeletTestSuite) TestGetLocalPodList() {
 	mockConfig.Set("kubelet_tls_verify", false)
 	mockConfig.Set("kubelet_auth_token_path", "")
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	pods, err := kubeutil.GetLocalPodList()
@@ -269,9 +280,7 @@ func (suite *KubeletTestSuite) TestGetNodeInfo() {
 	mockConfig.Set("kubelet_tls_verify", false)
 	mockConfig.Set("kubelet_auth_token_path", "")
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	ip, name, err := kubeutil.GetNodeInfo()
@@ -302,9 +311,7 @@ func (suite *KubeletTestSuite) TestGetNodename() {
 	mockConfig.Set("kubelet_tls_verify", false)
 	mockConfig.Set("kubelet_auth_token_path", "")
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	hostname, err := kubeutil.GetNodename()
@@ -332,9 +339,7 @@ func (suite *KubeletTestSuite) TestPodlistCache() {
 	mockConfig.Set("kubernetes_kubelet_host", "localhost")
 	mockConfig.Set("kubernetes_http_kubelet_port", kubeletPort)
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	kubeutil.GetLocalPodList()
@@ -372,9 +377,7 @@ func (suite *KubeletTestSuite) TestGetPodForContainerID() {
 	mockConfig.Set("kubernetes_kubelet_host", "localhost")
 	mockConfig.Set("kubernetes_http_kubelet_port", kubeletPort)
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	// Empty container ID
@@ -412,9 +415,7 @@ func (suite *KubeletTestSuite) TestGetPodWaitForContainer() {
 	mockConfig.Set("kubernetes_http_kubelet_port", kubeletPort)
 	mockConfig.Set("kubelet_wait_on_missing_container", 1)
 
-	kubeutil, err := GetKubeUtil()
-	require.NoError(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	requests := 0
@@ -457,9 +458,7 @@ func (suite *KubeletTestSuite) TestGetPodDontWaitForContainer() {
 	mockConfig.Set("kubernetes_http_kubelet_port", kubeletPort)
 	mockConfig.Set("kubelet_wait_on_missing_container", 0)
 
-	kubeutil, err := GetKubeUtil()
-	require.NoError(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	requests := 0
@@ -798,9 +797,7 @@ func (suite *KubeletTestSuite) TestPodListExpire() {
 	mockConfig.Set("kubelet_tls_verify", false)
 	mockConfig.Set("kubelet_auth_token_path", "")
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	// Mock time.Now call
@@ -893,9 +890,7 @@ func (suite *KubeletTestSuite) TestPodListWithNullPod() {
 	mockConfig.Set("kubelet_tls_verify", false)
 	mockConfig.Set("kubelet_auth_token_path", "")
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	pods, err := kubeutil.ForceGetLocalPodList()
@@ -922,9 +917,7 @@ func (suite *KubeletTestSuite) TestPodListOnKubeletInit() {
 	mockConfig.Set("kubelet_tls_verify", false)
 	mockConfig.Set("kubelet_auth_token_path", "")
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	pods, err := kubeutil.ForceGetLocalPodList()
@@ -946,9 +939,7 @@ func (suite *KubeletTestSuite) TestPodListWithPersistentVolumeClaim() {
 	mockConfig.Set("kubelet_tls_verify", false)
 	mockConfig.Set("kubelet_auth_token_path", "")
 
-	kubeutil, err := GetKubeUtil()
-	require.Nil(suite.T(), err)
-	require.NotNil(suite.T(), kubeutil)
+	kubeutil := suite.getCustomKubeUtil()
 	kubelet.dropRequests() // Throwing away first GETs
 
 	pods, err := kubeutil.ForceGetLocalPodList()

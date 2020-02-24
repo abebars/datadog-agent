@@ -64,6 +64,7 @@ type KubeUtil struct {
 	filter                   *containers.Filter
 	waitOnMissingContainer   time.Duration
 	podUnmarshaller          *podUnmarshaller
+	httpOnly                 bool // Used only in unit tests
 }
 
 // ResetGlobalKubeUtil is a helper to remove the current KubeUtil global
@@ -359,7 +360,7 @@ func (ku *KubeUtil) setupkubeletAPIClient() error {
 		log.Debug("Using HTTPS with service account bearer token")
 		return ku.setBearerToken(kubernetes.ServiceAccountTokenPath)
 	default:
-		log.Debug("No configured token or TLS certificates, will try http only")
+		log.Debug("No configured token or TLS certificates, https probably won't work - only http")
 		return nil
 	}
 }
